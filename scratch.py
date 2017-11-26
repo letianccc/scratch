@@ -21,68 +21,75 @@ class Book:
 class AllBook:
     def __init__(self):
         self.booknum = 0
-        self.max_booknum = 2
+        self.max_booknum = 20
         self.min_score = 11
 
 
 def book_score(soup):
     tag = soup.find('strong')
     if tag:
-        score = tag.string.encode().decode().strip()
+        score = text_in_tag(tag)
+        score = score.strip()
         if score:
             score = float(score)
             return score
     return None
 
+def text_in_tag(tag):
+    return tag.string.encode().decode()
+
 
 def book_name(soup):
-    t = soup.find('title')
-    name = t.string.encode().decode()
-    name = name[:-5]
+    tag = soup.find('title')
+    title = text_in_tag(tag)
+    name = title[:-5]
     name = name.strip()
     return name
 
 
 def more_books(soup):
-    tags = soup.find_all('img', 'm_sub_img')
-    links = list()
-    for tag in tags:
-        dt = tag.parent.parent
-        dd = dt.next_sibling.next_sibling
-        link = dd.next_element.next_element
-        links.append(link)
-
+    a_tags = a_tags_with_bookdata(soup)
     books = list()
-    for link in links:
-        name = link.string.encode().decode().strip()
+    for a in a_tags:
+        name = text_in_tag(a)
+        name = name.strip()
         score = None
-        url = link.attrs['href']
+        url = a.attrs['href']
         b = Book(name, score, url)
         books.append(b)
     return books
 
+def a_tags_with_bookdata(soup):
+    imgs_tags = soup.find_all('img', 'm_sub_img')
+    a_tags = list()
+    for img in imgs_tags:
+        a = img.parent
+        dt = a.parent
+        line_break_char = dt.next_sibling
+        dd = line_break_char.next_sibling
+        line_break_char = dd.next_element
+        a = line_break_char.next_sibling
+        a_tags.append(a)
+    return a_tags
 
 def handle_book(allbook, book, conn, cursor):
     insert_book(allbook, book, conn, cursor)
-    if is_overflow(allbook):
+    if allbook.booknum > allbook.max_booknum:
         remove_book(allbook, conn, cursor)
     update_min_score(allbook, cursor)
 
 
 def can_insert(allbook, book):
     if book.score:
-        return (book.score > allbook.min_score
-                or not is_overflow(allbook))
+        if book.score > allbook.min_score \
+                or allbook.booknum < allbook.max_booknum:
+            return True
     else:
         return False
 
 
 def is_higher_score(allbook, book):
     return book.score > allbook.min_score
-
-
-def is_overflow(allbook):
-    return allbook.booknum > allbook.max_booknum
 
 
 def insert_book(allbook, book, conn, cursor):
@@ -96,10 +103,12 @@ def insert_book_db(book, conn, cursor):
     cursor.execute(insert_sql, values)
     conn.commit()
 
-def insert_explored_url(url, conn, cursor):
-    insert_sql = "INSERT INTO explored_book(id)" \
-                 "VALUES (%s);"
-    values = re.findall('\d+', url)
+def insert_explored_url(book, conn, cursor):
+    insert_sql = "INSERT INTO explored_book(id, name)" \
+                 "VALUES (%s, %s);"
+    [id] = re.findall('\d+', book.url)
+    name = book.name
+    values = [id, name]
     cursor.execute(insert_sql, values)
     conn.commit()
 
@@ -124,7 +133,7 @@ def update_min_score(allbook, cursor):
 
 
 def explore_book(allbook, book, conn, cursor):
-    insert_explored_url(book.url, conn, cursor)
+    insert_explored_url(book, conn, cursor)
 
     # global explored_num, max_num
     with urlopen(book.url) as response:
